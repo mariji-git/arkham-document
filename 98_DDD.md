@@ -185,5 +185,7 @@ domain
 application → domain（interface）
 infrastructure → domain（interface実装）
 
+ドメインに存在するインターフェイスをアプリケーションで利用する
+
 ```
 
