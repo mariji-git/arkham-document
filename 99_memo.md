@@ -1,69 +1,90 @@
-### 内臓疾患・ガン等のリスクを下げる犬選びポイント
+```
+// DomainEvent
+export interface DomainEvent {
+  readonly type: string;
+  readonly occurredAt: string;
+  readonly payload?: unknown;
+}
 
-| 観点 | チェック項目 | 判断基準 | 理由・目的 |
-| :--- | :--- | :--- | :--- |
-| 骨格・体力 | 月齢に対する体重 | 重い子を選ぶ | 内臓が丈夫で、病気や投薬に耐えうる体力がある。 |
-| 成長予想 | 成犬時のサイズ | 3kg前後の標準サイズ | 内臓のキャパシティが大きく、腎疾患等のリスクが低い。 |
-| 内臓の強さ | 食欲の状態 | 完食し、おかわりを欲しがる | 消化器系が強く、将来的な全身疾患への耐性が高い。 |
-| 遺伝要因 | 家系の既往歴 | 癌・腎疾患の血統がいない | 親・祖父母の死因を確認し、遺伝的素因を排除する。 |
-| 構造欠陥 | 検診結果 | 異常なし（完ぺきな子） | 構造的欠陥がない個体としての完成度の高さ。 |
-| 精神面 | 性格と行動 | 物怖じせず活発 | 免疫力を維持するためにストレス耐性が高い子を選ぶ。 |
-| 排泄状態 | 便の安定性 | 常に良い便をしている | 腸内環境が整っており、自己免疫力が高い。 |
-| 可視粘膜 | 歯茎の色 | 綺麗なピンク色 | 循環器・血液の状態が良く、内臓への血流が正常。 |
+// Domain側が依存するポート
+export interface DomainEventDispatcher {
+  publish(event: DomainEvent): Promise<void>; // 非同期を想定
+}
+```
 
-### その他
-- ヘルニア持っていないか
-- 潜在精巣（せんざいせいそう）
-  - 精巣がさわれること
-  - 二つ降りてきてること
-- 生後３か月
-- フレンドリー
+```
+import { Subject } from 'rxjs';
+import { DomainEventDispatcher, DomainEvent } from '../../domain/events';
 
-|病名|略称|症状とリスク|
-|---|---|---|
-|進行性網膜萎縮症|PRA|目の中の網膜が徐々に萎縮し、最終的に失明する病気です。治療法はありません。|
-|フォンヴィレブランド病1型|vWD1|血液を固める成分が不足する血液疾患。ケガや手術の際、血が止まらなくなるリスクがあります。|
-|変性性脊髄症|DM|痛みなく足の麻痺が進行する脊髄の病気。最終的には呼吸不全に至る、非常に重い神経疾患です。|
+export class RxEventBus implements DomainEventDispatcher {
+  private subject = new Subject<DomainEvent>();
+  publish(e: DomainEvent): Promise<void> {
+    this.subject.next(e);
+    return Promise.resolve();
+  }
+  // projections 用に購読インターフェースを公開
+  subscribe(handler: (e: DomainEvent) => void) {
+    return this.subject.subscribe(handler);
+  }
+}
+```
 
-### トイプードル：子犬の体重から見る「成犬時」の予測表
+```
+class MatchAggregate {
+  constructor(private readonly events: DomainEventDispatcher) {}
 
-| 子犬の時期 | **成犬時 2.0kg前後**<br>(タイニー予想) | **成犬時 3.0kg〜3.5kg**<br>(標準トイ・丈夫) | **成犬時 4.0kg〜5.0kg**<br>(大きめトイ・超丈夫) |
-| :--- | :--- | :--- | :--- |
-| **生後1ヶ月** | 400g 前後 | **550g 〜 650g** | **700g 以上** |
-| **生後2ヶ月** | 800g 前後 | **1,000g 〜 1,200g** | **1,300g 以上** |
-| **生後3ヶ月** | 1,200g 前後 | **1,500g 〜 1,800g** | **2,000g 以上** |
+  scorePoint() {
+    // ドメインの状態変更...
+    this.events.publish({
+      type: 'MatchScoreChanged',
+      occurredAt: new Date().toISOString(),
+      payload: { matchId: 'm1', score: { a: 10, b: 8 } },
+    });
+  }
+}
+```
 
----
+```
+// projections 側で RxEventBus を受け取り購読
+eventBus.subscribe(ev => {
+  if (ev.type === 'MatchScoreChanged') {
+    // PointHistoryStore (例: `point-history.store.ts`) の subject を更新
+    pointHistoryStore.replaceAll(/* map from ev.payload */);
+  }
+});
+```
 
-### 「モコタ」くん候補のデータ照合（2026年3月19日時点）
+```
+// イベントマップ
+type DomainEventMap = {
+  MatchScoreChanged: { matchId: string; score: { a: number; b: number } };
+  PointAdded: { matchId: string; pointId: string; winner: 'A' | 'B' };
+};
 
-* **候補A（1/25生まれ）：現在1,292g（生後約53日）**
-    * **判定：** 「成犬時 4.0kg 〜 5.0kg」のライン。
-    * **健康面：** 骨格が非常に太く、内臓の予備能力が最大級。病気に強い「超丈夫」なタイプ。
-* **候補B（生後1ヶ月時 600g）：**
-    * **判定：** 「成犬時 3.0kg 〜 3.8kg」のライン。
-    * **健康面：** トイプードルの理想的な標準サイズ。バランスが良く、健康管理がしやすいタイプ。
+// 汎用 DomainEvent
+type DomainEvent<K extends keyof DomainEventMap = keyof DomainEventMap> = {
+  type: K;
+  occurredAt: string;
+  payload: DomainEventMap[K];
+};
 
-> **注記：** 体重は食事量や運動量で多少変動しますが、この骨格ベースの予測は「内臓の強さ」や「骨の丈夫さ」を知る大きな指標になります。
+// ジェネリック EventBus
+class TypedRxEventBus {
+  private subject = new Subject<DomainEvent>();
 
-```mermaid
-gantt
-    title モコタくん 食事・成長・しつけスケジュール
-    dateFormat  MM-DD
-    section 食事管理
-    ブリーダー指定フード（完全ふやかし） :03-24,03-26, 1d
-    徐々にドライフードへ移行（混合期）   :04-07, 14d
-    1日3回給餌（内臓負担の分散）         :03-24, 60d
-    1日2回給餌への移行検討               :05-24, 30d
-    section サプリ・水
-    ヤギミルク（水分補給・栄養補助）     :03-24, 30d
-    整腸剤・プロバイオティクス（任意）   :03-24, 30d
-    section 健康・ワクチン
-    環境順応・安静期間                   :active, 03-24, 7d
-    混合ワクチン接種（最終）             :04-15, 1d
-    狂犬病予防接種                       :05-15, 1d
-    section しつけ
-    トイレトレーニング（集中期）         :03-24, 30d
-    ハウストレーニング（安心できる場所） :03-24, 60d
-    社会化（抱っこ散歩〜地面歩行）       :04-15, 45d
+  publish<E extends keyof DomainEventMap>(type: E, payload: DomainEventMap[E]) {
+    this.subject.next({ type, occurredAt: new Date().toISOString(), payload });
+  }
+
+  ofType<E extends keyof DomainEventMap>(type: E) {
+    return this.subject.asObservable().pipe(
+      filter((e): e is DomainEvent<E> => e.type === type)
+    );
+  }
+}
+
+eventBus.ofType('MatchScoreChanged').subscribe(ev => {
+  // ev.payload は { matchId: string; score: { a:number; b:number } } として型安全
+});
+
 ```
